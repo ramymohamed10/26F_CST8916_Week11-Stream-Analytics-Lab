@@ -18,7 +18,10 @@ You’ll test queries against a short recording of the sale, then replay it thro
 
 Download and extract this lab, or clone its repository. Open the folder containing `producer.py` and `requirements.txt` in your editor. You’ll also need **Python 3.11 or later**, a terminal, and access to the [Azure portal](https://portal.azure.com).
 
-Use the **course sandbox**. Your account needs permission to create resources, configure Event Hubs shared access policies, and use a storage account key. The walkthrough assumes the sandbox permits those keys. Event Hubs Basic, a running Stream Analytics job, and Blob Storage can incur charges. Use the dedicated resource group in section 2 so you can remove everything together.
+**Before you start Azure setup**
+
+1. Sign in to the Azure portal with the account you used to activate **Azure for Students**. Open **Subscriptions** and confirm your student subscription is **Active**. Select it whenever a lab step asks for a subscription. [Activate Azure for Students](https://azure.microsoft.com/en-ca/free/students)
+2. Check your remaining credit and expiry date on the **Balance** page of the Azure Sponsorships portal. Event Hubs, a running Stream Analytics job, and stored blobs can use that credit. Start the job only for the live replay and delete the lab resource group when you finish. If your subscription is disabled or your credit is exhausted, contact your instructor before creating resources. [Check your student credit](https://www.microsoftazuresponsorships.com/) · [Microsoft’s balance instructions](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/azurestudents-subscription-disabled#you-used-all-of-your-credit)
 
 ```mermaid
 flowchart LR
@@ -55,10 +58,10 @@ Open the [ticket-sale recording](sample/ticket-rush.json). Each object represent
 
 ### Create the resources
 
-1. In the Azure portal, open **Resource groups → Create**. Choose your course subscription, name the group `cst8916-week11-rg`, and use **Canada Central** or your instructor’s region. Use this group and region throughout.
+1. In the Azure portal, open **Resource groups → Create**. Select **Azure for Students** and name the group `cst8916-week11-rg`. Choose a region your subscription allows that offers **Event Hubs**, **Stream Analytics**, and **Storage**. **Canada Central** is one option if it meets both conditions. Use the same subscription, group, and region for all three resources. [Azure product availability by region](https://azure.microsoft.com/en-ca/explore/global-infrastructure/products-by-region/table)
 2. Search for **Event Hubs → Create**. Create a namespace named `tickets-<suffix>` on the **Basic** tier with **1 throughput unit**. A namespace holds event hubs. Replace `<suffix>` with a unique combination of letters and digits. After deployment, open the namespace, select **Event Hubs → + Event Hub**, and create `ticket-requests` with **1 partition** and **1 day** of retention. One partition keeps this small stream in send order.
 3. In the namespace, open **Shared access policies → + Add**. Create `ticket-send` with **Send** as its only permission. Repeat for `ticket-listen` with **Listen** as its only permission. The Python producer uses the first policy, and the analytics job uses the second. Keep the primary connection string for `ticket-send` accessible in the portal for section 4.
-4. Search for **Storage accounts → Create**. Choose a globally unique name such as `tickets26f<suffix>` using only lowercase letters and digits (3–24 characters total). Select **Standard**, **LRS** redundancy, and a general-purpose v2 account. Under **Advanced**, verify that **Allow storage account key access** is enabled for this course account. After deployment, open **Data storage → Containers → + Container** and create a private container named `ticket-results`.
+4. Search for **Storage accounts → Create**. Choose a globally unique name such as `tickets26f<suffix>` using only lowercase letters and digits (3–24 characters total). Select **Standard**, **LRS** redundancy, and a general-purpose v2 account. For the connection-string setup, enable **Advanced → Allow storage account key access** on this new account. If your subscription blocks keys, use the managed identity option in [troubleshooting](#if-something-looks-wrong). After deployment, open **Data storage → Containers → + Container** and create a private container named `ticket-results`.
 5. Search for **Stream Analytics jobs → Create**. Name the job `ticket-rush-<suffix>`, choose **Cloud**, and select **1/3 streaming unit** on Standard V2. Open the job after deployment. Leave it stopped while you work through the recording. [Streaming unit options](https://learn.microsoft.com/en-us/azure/stream-analytics/stream-analytics-streaming-unit-consumption)
 
 ### Connect the job
@@ -70,7 +73,7 @@ Inside the Stream Analytics job, add the following under **Job topology**. An **
 | Add via | **Inputs → Add input → Event Hub** | **Outputs → Add output → Blob storage/ADLS Gen2** |
 | Alias | `ticket-requests` | `ticket-results` |
 | Resource | Your namespace → hub `ticket-requests` → consumer group `$Default` | Your storage account → container `ticket-results` |
-| Authentication | **Connection string** → use existing policy `ticket-listen` | **Connection string** (storage account key) → select your course storage account |
+| Authentication | **Connection string** → use existing policy `ticket-listen` | **Connection string** (storage account key) → select the storage account you created in section 2 |
 | Data format | **JSON**, UTF-8 | **JSON**, UTF-8, **Line separated** |
 
 For the output, use **Append as results arrive**, path pattern `summaries/{date}/{time}`, date format `YYYY/MM/DD`, and time format `HH`. Set **Minimum rows** to **1** and **Maximum time** to **1 minute** if the batching fields appear. Save each connection. When using manual settings, the input takes the Listen policy name and its key. The storage output takes the storage account name and one of its access keys. Keep keys out of your code, screenshots, and incident update. [Blob output settings](https://learn.microsoft.com/en-us/azure/stream-analytics/blob-storage-azure-data-lake-gen2-output)
@@ -255,15 +258,17 @@ At 19:00:02 UTC the first slow phone checkout completed, and four of the six slo
 </details>
 
 1. Stop the Stream Analytics job from **Overview → Stop**.
-2. Save any results you need. Open **Resource groups → cst8916-week11-rg** and verify the group contains only the resources for this lab.
-3. Select **Delete resource group** and confirm the group name. Check that Azure completes the deletion. Close the terminal to clear its session credentials.
+2. Save any results you need. In your **Azure for Students** subscription, open **Resource groups → cst8916-week11-rg** and verify the group contains only your Week 11 resources.
+3. Select **Delete resource group** and confirm the group name. Wait for the deletion to complete. This removes the Event Hubs namespace and storage account that can continue using student credit after the job stops. Close the terminal to clear its session credentials.
 
 ### If something looks wrong
 
 | Symptom | What to check |
 | --- | --- |
+| Azure rejects the region during creation | Open **Policy → Assignments**, set the scope to your **Azure for Students** subscription, and open **Allowed resource deployment regions** if listed. Under **Parameters**, find your allowed locations. Choose one that offers all three lab services and retry. [Student region policy guidance](https://learn.microsoft.com/en-us/answers/questions/5840169/unable-to-create-resource-on-azure-for-students-po) |
 | The preview is empty, or Query 1 returns a different count | Select `ticket-requests` in the query editor and upload the original sample file. **Reset** switches back to incoming hub data. Test Query 1 again. |
 | The producer cannot connect | Use the hub name `ticket-requests` and the **full** primary connection string from `ticket-send`. Set both variables in the terminal running Python. Check the SDK installed in the active virtual environment. |
-| An input or output connection test fails | Match `ticket-listen` to the input and the course storage account key to the output. Check the selected namespace, account, and container. If the course subscription blocks Shared Key, ask the instructor for the sandbox connection. |
+| An input or output connection test fails | Check that both connections point to your Week 11 resources in **Azure for Students**. The Event Hub input uses `ticket-listen`. The Blob output uses the key from your lab storage account. |
+| Azure reports that Shared Key access is disabled on the storage account | Enable the Stream Analytics job’s **system-assigned managed identity**. In the storage account’s **Access control (IAM)**, assign that identity **Storage Blob Data Contributor**. In the job’s Blob output, choose **Managed identity (system-assigned)**, save, and retest after the role takes effect. [Microsoft’s Blob output walkthrough](https://learn.microsoft.com/en-us/azure/stream-analytics/blob-output-managed-identity) |
 | The producer finished but the container looks empty | Verify the job was **Running** first, Query 3 was saved, and the UTC path matches your replay. In the job’s **Monitoring → Metrics**, inspect **Input Events**, **Output Events**, and **Runtime Errors**. Output batching can delay the blob. |
 | Live totals include another replay or a partial run | Compare `windowEnd` with the terminal timestamps. For a clean measurement, wait at least 10 seconds after the previous send, then replay once and count only the new windows. A second complete replay contributes another 35 requests. |
