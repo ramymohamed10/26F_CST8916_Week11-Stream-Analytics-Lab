@@ -1,18 +1,18 @@
 # Week 11 lab · The campus concert ticket rush
 
-**CST8916 · Remote Data and Real-time Applications | 75–90 minutes | Beginner**
+**CST8916 · Remote Data and Real-time Applications**
 
 The student union has been selling early-access concert tickets. At **19:00 UTC**, sales open to the whole campus. A message arrives at the help desk. “I picked my seats, but checkout took forever.” Another student says their order went through. You’re the on-call analyst. **When did the trouble start, who experienced it, and what should the ticketing team investigate first?**
 
 You’ll test queries against a short recording of the sale, then replay it through a live Azure pipeline. By the end you’ll have a JSON file of results and a two-sentence incident update backed by the data. Everything for this lab is in this folder.
 
-| Stage | Time | Finish line |
-| --- | --- | --- |
-| [1. Meet the incident](#1-meet-the-incident) | 10 min | Read a request and make a prediction |
-| [2. Build the pipeline](#2-build-the-pipeline) | 20–25 min | Connect the Event Hub input and Blob output |
-| [3. Investigate the recording](#3-investigate-the-recording) | 25–30 min | Find the slowdown and write a burst alert |
-| [4. Replay the sale live](#4-replay-the-sale-live) | 15 min | Verify a full run in Blob Storage |
-| [5. Report and clean up](#5-report-and-clean-up) | 5–10 min | Brief the ticketing team and remove your resources |
+| Stage                                                        | Time      | Finish line                                        |
+| ------------------------------------------------------------ | --------- | -------------------------------------------------- |
+| [1. Meet the incident](#1-meet-the-incident)                 | 10 min    | Read a request and make a prediction               |
+| [2. Build the pipeline](#2-build-the-pipeline)               | 20–25 min | Connect the Event Hub input and Blob output        |
+| [3. Investigate the recording](#3-investigate-the-recording) | 25–30 min | Find the slowdown and write a burst alert          |
+| [4. Replay the sale live](#4-replay-the-sale-live)           | 15 min    | Verify a full run in Blob Storage                  |
+| [5. Report and clean up](#5-report-and-clean-up)             | 5–10 min  | Brief the ticketing team and remove your resources |
 
 ## 1. Meet the incident
 
@@ -43,13 +43,13 @@ Open the [ticket-sale recording](sample/ticket-rush.json). Each object represent
 }
 ```
 
-| Field | How to read it |
-| --- | --- |
-| `eventTime` | When the request completed. The trailing `Z` means UTC. |
-| `requestId` | Identifies one request in the recording. |
-| `deviceType` | The visitor used a `phone` or a `desktop`. |
-| `path` | The page requested: `/tickets`, `/seats`, or `/checkout`. |
-| `responseMs` | Response time in milliseconds. The help desk considers **2,000 ms or more** slow. |
+| Field        | How to read it                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------- |
+| `eventTime`  | When the request completed. The trailing `Z` means UTC.                                            |
+| `requestId`  | Identifies one request in the recording.                                                           |
+| `deviceType` | The visitor used a `phone` or a `desktop`.                                                         |
+| `path`       | The page requested: `/tickets`, `/seats`, or `/checkout`.                                          |
+| `responseMs` | Response time in milliseconds. The help desk considers **2,000 ms or more** slow.                  |
 | `statusCode` | HTTP 200 means the request succeeded. HTTP 503 means the service was unavailable for that request. |
 
 **Checkpoint.** Which two fields would tell you whether the complaint is specific to a device and page? Which field would distinguish a slow success from a failure? Write your prediction before opening the query editor.
@@ -68,13 +68,13 @@ Open the [ticket-sale recording](sample/ticket-rush.json). Each object represent
 
 Inside the Stream Analytics job, add the following under **Job topology**. An **alias** is the name your SQL uses for a connection. Use the spellings below, including the hyphens.
 
-| | Event Hub input | Blob output |
-| --- | --- | --- |
-| Add via | **Inputs → Add input → Event Hub** | **Outputs → Add output → Blob storage/ADLS Gen2** |
-| Alias | `ticket-requests` | `ticket-results` |
-| Resource | Your namespace → hub `ticket-requests` → consumer group `$Default` | Your storage account → container `ticket-results` |
-| Authentication | **Connection string** → use existing policy `ticket-listen` | **Connection string** (storage account key) → select the storage account you created in section 2 |
-| Data format | **JSON**, UTF-8 | **JSON**, UTF-8, **Line separated** |
+|                | Event Hub input                                                    | Blob output                                                                                       |
+| -------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Add via        | **Inputs → Add input → Event Hub**                                 | **Outputs → Add output → Blob storage/ADLS Gen2**                                                 |
+| Alias          | `ticket-requests`                                                  | `ticket-results`                                                                                  |
+| Resource       | Your namespace → hub `ticket-requests` → consumer group `$Default` | Your storage account → container `ticket-results`                                                 |
+| Authentication | **Connection string** → use existing policy `ticket-listen`        | **Connection string** (storage account key) → select the storage account you created in section 2 |
+| Data format    | **JSON**, UTF-8                                                    | **JSON**, UTF-8, **Line separated**                                                               |
 
 For the output, use **Append as results arrive**, path pattern `summaries/{date}/{time}`, date format `YYYY/MM/DD`, and time format `HH`. Set **Minimum rows** to **1** and **Maximum time** to **1 minute** if the batching fields appear. Save each connection. When using manual settings, the input takes the Listen policy name and its key. The storage output takes the storage account name and one of its access keys. Keep keys out of your code, screenshots, and incident update. [Blob output settings](https://learn.microsoft.com/en-us/azure/stream-analytics/blob-storage-azure-data-lake-gen2-output)
 
@@ -139,11 +139,11 @@ GROUP BY deviceType, TumblingWindow(second, 10)
 
 Each cell shows **requests / failures**. The portal may display the rows in a different order.
 
-| Window end (UTC) | Phone | Desktop |
-| --- | --- | --- |
-| 19:00:00 | 5 / 0 | 5 / 0 |
-| 19:00:10 | 10 / 4 | 5 / 0 |
-| 19:00:20 | 5 / 0 | 5 / 0 |
+| Window end (UTC) | Phone  | Desktop |
+| ---------------- | ------ | ------- |
+| 19:00:00         | 5 / 0  | 5 / 0   |
+| 19:00:10         | 10 / 4 | 5 / 0   |
+| 19:00:20         | 5 / 0  | 5 / 0   |
 
 The middle interval contains 15 requests. Four of the ten phone requests failed. The five desktop requests in that same interval succeeded.
 
@@ -263,12 +263,12 @@ At 19:00:02 UTC the first slow phone checkout completed, and four of the six slo
 
 ### If something looks wrong
 
-| Symptom | What to check |
-| --- | --- |
-| Azure rejects the region during creation | Open **Policy → Assignments**, set the scope to your **Azure for Students** subscription, and open **Allowed resource deployment regions** if listed. Under **Parameters**, find your allowed locations. Choose one that offers all three lab services and retry. [Student region policy guidance](https://learn.microsoft.com/en-us/answers/questions/5840169/unable-to-create-resource-on-azure-for-students-po) |
-| The preview is empty, or Query 1 returns a different count | Select `ticket-requests` in the query editor and upload the original sample file. **Reset** switches back to incoming hub data. Test Query 1 again. |
-| The producer cannot connect | Use the hub name `ticket-requests` and the **full** primary connection string from `ticket-send`. Set both variables in the terminal running Python. Check the SDK installed in the active virtual environment. |
-| An input or output connection test fails | Check that both connections point to your Week 11 resources in **Azure for Students**. The Event Hub input uses `ticket-listen`. The Blob output uses the key from your lab storage account. |
+| Symptom                                                                 | What to check                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Azure rejects the region during creation                                | Open **Policy → Assignments**, set the scope to your **Azure for Students** subscription, and open **Allowed resource deployment regions** if listed. Under **Parameters**, find your allowed locations. Choose one that offers all three lab services and retry. [Student region policy guidance](https://learn.microsoft.com/en-us/answers/questions/5840169/unable-to-create-resource-on-azure-for-students-po)                     |
+| The preview is empty, or Query 1 returns a different count              | Select `ticket-requests` in the query editor and upload the original sample file. **Reset** switches back to incoming hub data. Test Query 1 again.                                                                                                                                                                                                                                                                                    |
+| The producer cannot connect                                             | Use the hub name `ticket-requests` and the **full** primary connection string from `ticket-send`. Set both variables in the terminal running Python. Check the SDK installed in the active virtual environment.                                                                                                                                                                                                                        |
+| An input or output connection test fails                                | Check that both connections point to your Week 11 resources in **Azure for Students**. The Event Hub input uses `ticket-listen`. The Blob output uses the key from your lab storage account.                                                                                                                                                                                                                                           |
 | Azure reports that Shared Key access is disabled on the storage account | Enable the Stream Analytics job’s **system-assigned managed identity**. In the storage account’s **Access control (IAM)**, assign that identity **Storage Blob Data Contributor**. In the job’s Blob output, choose **Managed identity (system-assigned)**, save, and retest after the role takes effect. [Microsoft’s Blob output walkthrough](https://learn.microsoft.com/en-us/azure/stream-analytics/blob-output-managed-identity) |
-| The producer finished but the container looks empty | Verify the job was **Running** first, Query 3 was saved, and the UTC path matches your replay. In the job’s **Monitoring → Metrics**, inspect **Input Events**, **Output Events**, and **Runtime Errors**. Output batching can delay the blob. |
-| Live totals include another replay or a partial run | Compare `windowEnd` with the terminal timestamps. For a clean measurement, wait at least 10 seconds after the previous send, then replay once and count only the new windows. A second complete replay contributes another 35 requests. |
+| The producer finished but the container looks empty                     | Verify the job was **Running** first, Query 3 was saved, and the UTC path matches your replay. In the job’s **Monitoring → Metrics**, inspect **Input Events**, **Output Events**, and **Runtime Errors**. Output batching can delay the blob.                                                                                                                                                                                         |
+| Live totals include another replay or a partial run                     | Compare `windowEnd` with the terminal timestamps. For a clean measurement, wait at least 10 seconds after the previous send, then replay once and count only the new windows. A second complete replay contributes another 35 requests.                                                                                                                                                                                                |
