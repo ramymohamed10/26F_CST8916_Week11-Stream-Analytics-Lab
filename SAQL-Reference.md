@@ -1,22 +1,36 @@
-# Query reference · Campus concert ticket rush
+# SAQL reference · How to read a ticket-rush query
 
-Use this page when you want to change a query or try the optional challenge. The examples use the same input, output, and six request fields as the [student walkthrough](README.md#3-investigate-the-recording).
+In Azure Stream Analytics Query Language (SAQL), each event in the ticket stream supplies one request’s fields. Use this guide to work out which events a query reads and what one row of its output means. The examples use the recording from the [student walkthrough](README.md#3-investigate-the-recording).
 
 ## Read a query
 
-| Clause or expression | Question it answers in this lab |
-| --- | --- |
-| `FROM [ticket-requests]` | Which connection supplies the ticket requests? |
-| `TIMESTAMP BY eventTime` | Which clock places a request in a window? Here it is the UTC time recorded in the request. By default, an Event Hub input uses enqueue time. |
-| `WHERE path = '/checkout'` | Which individual requests enter the calculation? |
-| `GROUP BY deviceType, TumblingWindow(second, 10)` | Which requests should be counted together? Here each device type gets its own count in each ten-second interval. |
-| `COUNT(*)` | How many matching requests are in this group? |
-| `SUM(CASE WHEN statusCode >= 500 THEN 1 ELSE 0 END)` | How many of the requests in this group were server errors? The success rows still contribute to the total request count. |
-| `HAVING COUNT(*) >= 3` | Which groups have enough matching requests to report? |
-| `System.Timestamp()` | What time should label this window’s result? It returns the window end in these grouped queries. |
-| `SELECT … INTO [ticket-results]` | Which columns should the job write, and to which output? |
+**When writing a query**, start with `SELECT` (result fields), `INTO` (the lab output), and `FROM` (the lab input). Add `TIMESTAMP BY` after the input name to choose the clock. The remaining clauses are optional and appear in this order. `WHERE` filters requests, `GROUP BY` collects them into groups, and `HAVING` filters those groups. [Microsoft’s SELECT reference](https://learn.microsoft.com/en-us/stream-analytics-query/select-azure-stream-analytics)
 
-**Example.** If you need both total traffic and failures, keep all requests and use the conditional sum. If you first add `WHERE statusCode >= 500`, successes are removed before counting and `COUNT(*)` now means “failed requests.”
+For example, **which device types made at least two requests to the seats page in a single ten-second interval?**
+
+```sql
+SELECT System.Timestamp() AS windowEnd, deviceType, COUNT(*) AS seatRequests
+INTO [ticket-results]
+FROM [ticket-requests] TIMESTAMP BY eventTime
+WHERE path = '/seats'
+GROUP BY deviceType, TumblingWindow(second, 10)
+HAVING COUNT(*) >= 2
+```
+
+**To read it, follow a request starting at `FROM`.** You can use the same questions for other queries and skip the clauses they omit.
+
+| Ask yourself | Read this part of the example |
+| --- | --- |
+| Where do the events come from, and which clock do I use? | `FROM [ticket-requests]` names the input connection. `TIMESTAMP BY eventTime` uses the recorded completion time. The default clock for an Event Hub input is the time the hub received the event. |
+| Does this request qualify? | `WHERE path = '/seats'` compares the request’s `path` field with the text value `'/seats'`. Only matching requests reach the count. |
+| Which requests belong together? | `GROUP BY deviceType, TumblingWindow(second, 10)` puts requests from the same device type and fixed ten-second interval together. |
+| Is the group large enough to report? | `COUNT(*)` counts the requests in one group. `HAVING COUNT(*) >= 2` keeps groups with at least two. |
+| What does one result row tell me? | `SELECT` returns the window’s end time, the device type, and the count. `AS` gives a result field a name, such as `seatRequests`. |
+| Where does the row go? | `INTO [ticket-results]` names the output connection. Square brackets enclose the lab’s hyphenated connection names. |
+
+**Trace one result.** In the interval ending at 19:00:10 UTC, `r16` and `r22` both requested `/seats` on a phone. Together they produce a row with `deviceType = phone` and `seatRequests = 2`. The desktop request `r17` also passes `WHERE`. It is the only desktop seats request in that interval, so its group drops out at `HAVING`.
+
+**What if you need two counts?** In Query 3, a success and a failure both contribute to total traffic. `COUNT(*)` counts them both, while `SUM(CASE WHEN statusCode >= 500 THEN 1 ELSE 0 END)` adds one only for each server error. Adding `WHERE statusCode >= 500` would remove the successes before either calculation. [Return to Query 3](README.md#query-3-how-did-traffic-change-during-the-rush)
 
 ## Pick a window
 
@@ -39,6 +53,12 @@ FROM [ticket-requests] TIMESTAMP BY eventTime
 WHERE path = '/checkout' AND statusCode >= 500
 GROUP BY deviceType, HoppingWindow(second, 10, 5)
 ```
+
+**Read the challenge query**
+
+1. `TIMESTAMP BY eventTime` uses the recorded clock. `WHERE` admits a request only if it reached `/checkout` and its status was 500 or higher.
+2. Read `HoppingWindow(second, 10, 5)` as “look back **10 seconds**, move forward **5 seconds**, and repeat.” `GROUP BY deviceType` keeps separate counts for phones and desktops within each window.
+3. Each result row tells you how many failed checkouts (`failedCheckouts`) one device type had in the ten seconds ending at `windowEnd`. To make your prediction for `r21`, find every window that contains 19:00:07 UTC.
 
 Select **Test query**. Compare the result with Query 3 in the walkthrough. Could the team add these counts to get the number of failed requests?
 

@@ -54,6 +54,14 @@ Open the [ticket-sale recording](sample/ticket-rush.json). Each object represent
 
 **Checkpoint.** Which two fields would tell you whether the complaint is specific to a device and page? Which field would distinguish a slow success from a failure? Write your prediction before opening the query editor.
 
+### A first look at SAQL
+
+**Azure Stream Analytics Query Language (SAQL)** is the SQL-based language you’ll use to ask questions about a stream of events. In this lab, an **event** is one completed ticket request, and a **stream** is the sequence of those requests. You describe the results you want. While the job runs, Azure keeps applying your query as requests arrive.
+
+Think about what **one row of the result** should mean. For “Which requests were slow?”, each row should describe one request, so you need a filter on `responseMs`. For “How many requests came from phones every ten seconds?”, each row should summarize several requests. A **window** sets the span of time to include in that count.
+
+A query is made of **clauses**, each with a job. You write `SELECT` first, but try reading the query starting at `FROM` to find the input. Then ask which requests to keep or group, what `SELECT` puts in one result row, and where `INTO` sends it. [SAQL reading guide](SAQL-Reference.md#read-a-query)
+
 ## 2. Build the pipeline
 
 ### Create the resources
@@ -66,7 +74,7 @@ Open the [ticket-sale recording](sample/ticket-rush.json). Each object represent
 
 ### Connect the job
 
-Inside the Stream Analytics job, add the following under **Job topology**. An **alias** is the name your SQL uses for a connection. Use the spellings below, including the hyphens.
+Inside the Stream Analytics job, add the following under **Job topology**. An **alias** is the name your query uses for a connection. Use the spellings below, including the hyphens.
 
 |                | Event Hub input                                                    | Blob output                                                                                       |
 | -------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
@@ -92,7 +100,11 @@ INTO [ticket-results]
 FROM [ticket-requests]
 ```
 
-`FROM` reads the named input, `SELECT *` keeps every field, and `INTO` names the destination. Square brackets let the aliases contain hyphens.
+**Read the query**
+
+1. `FROM [ticket-requests]` reads one event for each completed request. The square brackets keep the hyphenated connection name together.
+2. `SELECT *` keeps every field. With one input and no filtering or grouping, each request produces one result row with the same six fields.
+3. `INTO [ticket-results]` names the output for the running job. For this sample test, read the rows in the portal’s test results.
 
 **Check.** The full sample returns **35 requests**. Find `r01` and match its page and response time to the example in section 1.
 
@@ -107,6 +119,11 @@ FROM [ticket-requests]
 WHERE responseMs >= 2000
 ```
 
+**Read the query**
+
+1. `WHERE responseMs >= 2000` tests each request. Read `>=` as “greater than or equal to.” A request taking exactly 2,000 ms qualifies. Request `r01`, at 180 ms, drops out here.
+2. For each request that passes, `SELECT` lists the fields to show. Read `deviceType` and `path` to locate the slowdown, then `statusCode` to see whether that slow request succeeded. Each row still describes one request.
+
 **Check.** Identify the earliest slow request, its device and page, and how many of the slow requests still succeeded.
 
 <details>
@@ -118,7 +135,7 @@ Six rows qualify. All six are phone requests to `/checkout`. The first, `r13` at
 
 ### Query 3. How did traffic change during the rush?
 
-Group requests into **10-second tumbling windows**. Each request belongs to one fixed interval. `TIMESTAMP BY eventTime` uses the request’s recorded time. `System.Timestamp()` labels the result with the window’s end time.
+Compare phones and desktops over the same ten seconds. To measure both traffic and failures, start with all requests, including the fast ones.
 
 ```sql
 SELECT System.Timestamp() AS windowEnd,
@@ -130,7 +147,14 @@ FROM [ticket-requests] TIMESTAMP BY eventTime
 GROUP BY deviceType, TumblingWindow(second, 10)
 ```
 
-`COUNT(*)` counts every request in the group. The `CASE` contributes 1 for a server error and 0 for a success, so the sum counts failures. **Keep this query handy.** It produces the live report in section 4.
+**Read the query**
+
+1. `TIMESTAMP BY eventTime` uses the completion time inside each request to place it on the recording’s clock.
+2. `GROUP BY deviceType, TumblingWindow(second, 10)` collects requests by device type and by fixed ten-second interval. Each request belongs to exactly one group. A phone request at 19:00:03 goes into the phone group ending at 19:00:10 UTC.
+3. `COUNT(*) AS requests` counts every request in that group. The `CASE` gives each request a 1 if its status is 500 or higher and a 0 otherwise. `SUM(...) AS failures` adds those values. For example, `r13` (HTTP 200) and `r15` (HTTP 503) each add one to the phone request count, but only `r15` adds one to failures.
+4. `AS` names a result column. `System.Timestamp() AS windowEnd` labels the row with the end of its interval. Read the desktop row ending at 19:00:00 UTC as “During those ten seconds, desktops made five requests and all five succeeded.”
+
+**Keep this query handy.** It produces the live report in section 4.
 
 **Check.** Find the phone and desktop rows for the busiest interval. Did both device types experience failures?
 
@@ -151,7 +175,7 @@ The middle interval contains 15 requests. Four of the ten phone requests failed.
 
 ### Query 4. When should the on-call analyst get an alert?
 
-Write an alert for **at least three failed checkouts on the same device type within any 10 seconds**. A sliding window reevaluates when an event enters or leaves it. Use the starter below. Replace both comments with SQL clauses before testing.
+Write an alert for **at least three failed checkouts on the same device type within any 10 seconds**. Lines beginning with `--` are comments. Replace both comments with clauses before testing.
 
 ```sql
 SELECT System.Timestamp() AS alertTime, deviceType, COUNT(*) AS failedCheckouts
@@ -161,6 +185,12 @@ FROM [ticket-requests] TIMESTAMP BY eventTime
 GROUP BY deviceType, SlidingWindow(second, 10)
 -- Keep only groups that meet the alert threshold here.
 ```
+
+**Read the starter**
+
+1. The first blank tests one request at a time. Which two fields tell you it was both a checkout and a server error?
+2. `SlidingWindow(second, 10)` looks back ten seconds on the `eventTime` clock. For each device type, the count changes when a matching request enters that span or ages out of it.
+3. The second blank tests the group’s count. For a group that passes, `SELECT` reports when the window ended (`alertTime`), the device type, and how many failed checkouts were in it (`failedCheckouts`).
 
 <details>
 <summary>Hint</summary>
@@ -181,7 +211,9 @@ GROUP BY deviceType, SlidingWindow(second, 10)
 HAVING COUNT(*) >= 3
 ```
 
-The third failure triggers the first alert at **19:00:07 UTC**. The count reaches four at **19:00:09**. At **19:00:13**, the oldest failure leaves the window and three remain. Several alert rows can describe the same incident.
+`WHERE` keeps a request only when both conditions joined by `AND` are true. That makes `COUNT(*)` a count of failed checkouts for one device type. `HAVING COUNT(*) >= 3` keeps a result row whenever that count is three or more.
+
+At **19:00:07 UTC**, `r21` joins `r15` and `r18` in the phone window, producing the first alert. The count reaches four at **19:00:09**. At **19:00:13**, `r15` ages out and three remain. That last row still meets the threshold even though the change came from an earlier failure leaving the window.
 
 </details>
 
